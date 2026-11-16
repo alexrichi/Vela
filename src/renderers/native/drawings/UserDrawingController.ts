@@ -382,7 +382,10 @@ export class UserDrawingController implements IDrawingsRendererPort {
             } else if (mode === 'eraser') {
                 if (!this.eraserMode) this.toggleEraser();
             } else {
-                if (this.measureMode) this.exitMeasure();
+                // Disarming is not erasing: a drawn ruler stays on the chart until the
+                // next press/pan/zoom clears it, so leaving a cell or switching charts
+                // doesn't drop the measurement the user just made.
+                if (this.measureMode) this.exitMeasure(false);
                 if (this.eraserMode) this.exitEraser();
             }
         });
@@ -595,14 +598,15 @@ export class UserDrawingController implements IDrawingsRendererPort {
         }
     }
 
-    /** Toggle the transient ruler. Arming it clears any drawing tool + selection. */
+    /** Toggle the transient ruler. Arming it clears any drawing tool + selection, but never
+     *  erases a measurement already on the chart: the first click re-bases the ruler, and the
+     *  next press/pan/zoom clears it. */
     private toggleMeasure(): void {
         if (this.measureMode) {
-            this.exitMeasure();
+            this.exitMeasure(false); // off is not erase: the drawn ruler stays until the next press
             return;
         }
         if (this.eraserMode) this.exitEraser(); // only one renderer-local mode at a time
-        this.measure.clear();
         this.measureMode = true;
         this.emit({ kind: 'arm', type: null }); // clear any armed drawing tool (core-authoritative)
         this.clearSelection();

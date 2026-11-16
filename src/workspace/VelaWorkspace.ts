@@ -1133,9 +1133,13 @@ export class VelaWorkspace {
         }
         this.activeId = id; // switch FIRST — the departing cell's drawing:* events must not re-enter the mirrors
         const prevCell = prev ? this.cellsById.get(prev) : undefined;
+        // The ruler follows the user across charts: a cell left with Measure armed arms it
+        // again on the cell that becomes active. Eraser and drawing tools never follow.
+        const carryMeasure = prevCell?.chart.drawings.getMode() === 'measure';
         if (prevCell) {
             // Only the ACTIVE cell ever holds an armed tool or a transient mode: the
             // global tool re-arms on the next activation; measure/eraser don't follow.
+            // Disarming keeps a drawn ruler on the departing cell (see setMode).
             prevCell.chart.drawings.setTool(null);
             prevCell.chart.drawings.setMode(null);
         }
@@ -1145,6 +1149,7 @@ export class VelaWorkspace {
         }
         if (id) {
             this.projectActiveCell(); // trigger ① — the chrome rebinds to the new active cell
+            if (carryMeasure) this.cellsById.get(id)?.chart.drawings.setMode('measure');
             this.events.emit('cell:active', { id, prev });
             this.markStateDirty();
         }
