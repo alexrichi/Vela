@@ -155,6 +155,17 @@ describe('candle geometry (device-pixel snapping)', () => {
             }
         }
     });
+
+    it('draws a one-device-pixel wick on 1x and 125% displays', () => {
+        for (const dpr of [1, 1.25]) {
+            for (const spacing of spacings) {
+                expect(candleGeometry(10, spacing, dpr).wickW * dpr).toBe(1);
+            }
+        }
+        // Higher densities keep their old width: the wick never rounds up past the cap.
+        expect(candleGeometry(10, 20, 1.5).wickW * 1.5).toBe(2);
+        expect(candleGeometry(10, 20, 2).wickW * 2).toBe(3);
+    });
 });
 
 describe('aggregateCandleColumns (sub-pixel LOD bucketing)', () => {

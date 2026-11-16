@@ -45,7 +45,7 @@ export function candleStickColor(cs: CandleStyle, extent: Exclude<CandleStickExt
 
 /** Below this spacing a candle has no body (wick-only). */
 export const CANDLE_BODY_MIN_SPACING = 3;
-/** Wick line width in CSS px at wide zoom — rounded to whole device pixels per frame so it stays crisp. */
+/** Wick line width in CSS px at wide zoom — snapped down to whole device pixels per frame so it stays crisp. */
 export const CANDLE_WICK_W = 1.5;
 /** Below this spacing bars are bucketed per pixel column (aggregated). */
 export const CANDLE_AGG_MAX_SPACING = 1;
@@ -53,13 +53,23 @@ export const CANDLE_AGG_MAX_SPACING = 1;
 /**
  * Wick line width (CSS px) for a given bar spacing. The body is `~spacing·0.7` wide
  * (`half = floor(spacing·0.7)/2`), so a fixed wick reads as a solid body once bars get tight.
- * Cap the wick at the body's half-width and floor it at 1px: a crisp ~1.5px stick at wide zoom
- * that tapers to a 1px hair when zoomed out, never growing as wide as the candle body.
+ * Cap the wick at the body's half-width and floor it at 1px: a crisp hairline at wide zoom
+ * that tapers with the body as bars get tight, never growing as wide as the candle body.
  * Shared by both backends so canvas2d and WebGL2 thin the wick at the same thresholds.
  */
 export function wickWidth(spacing: number): number {
     const halfBody = Math.max(0.5, Math.floor(spacing * 0.7) / 2);
     return Math.max(1, Math.min(CANDLE_WICK_W, halfBody));
+}
+
+/**
+ * Wick width in whole device pixels. Rounds DOWN, never up: a 1.5 CSS px wick on a 1x
+ * display is one device pixel, not two, and it stays one pixel at 125% scaling. Rounding
+ * up made the wick read as thick as the body on ordinary monitors while looking right
+ * only on 2x ones. Never thinner than one device pixel.
+ */
+export function wickDeviceWidth(spacing: number, dpr: number): number {
+    return Math.max(1, Math.floor(wickWidth(spacing) * dpr));
 }
 
 export function candleTier(spacing: number): CandleTier {
@@ -103,7 +113,7 @@ export interface CandleGeometry {
  * Shared by both backends so canvas2d and WebGL2 lay candles out identically.
  */
 export function candleGeometry(xCss: number, spacing: number, dpr: number, bodyScale = 1): CandleGeometry {
-    const wickDev = Math.max(1, Math.round(wickWidth(spacing) * dpr));
+    const wickDev = wickDeviceWidth(spacing, dpr);
     const wickLeftDev = Math.round(xCss * dpr - wickDev / 2);
     let bodyDev = Math.max(wickDev, Math.round(Math.floor(spacing * 0.7 * bodyScale) * dpr));
     if ((bodyDev - wickDev) % 2 !== 0) bodyDev += 1; // parity-match so the overhang splits evenly
