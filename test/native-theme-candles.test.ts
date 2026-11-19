@@ -3,7 +3,7 @@
 // switch carries the candles to the next theme's colors, and a color a host or user chose
 // stays. Real charts on the native renderer, painting into the canvas stand-in.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { DARK_THEME, Vela } from '../src/index';
+import { DARK_THEME, LIGHT_THEME, Vela } from '../src/index';
 import { BEARISH, BULLISH } from '../src/core/palette';
 import type { OHLCV } from '../src/core/model/ohlcv';
 import type { ChartConfig } from '../src/renderers/native/core/chartConfig';
@@ -22,6 +22,7 @@ const bars: OHLCV[] = Array.from({ length: 50 }, (_, i) => ({ time: 1_700_000_00
 let restoreCanvas: () => void;
 beforeAll(() => {
     restoreCanvas = installCanvasStandIn();
+    Element.prototype.animate ??= (() => ({ cancel() {}, finish() {}, addEventListener() {} })) as unknown as Element['animate'];
 });
 afterAll(() => restoreCanvas());
 
@@ -70,5 +71,39 @@ describe('a theme’s candle colors', () => {
         expect(candles(c)).toMatchObject({ upColor: '#123456', downColor: '#ff00aa' });
         c.setTheme('dark');
         expect(candles(c)).toMatchObject({ upColor: '#123456', downColor: BEARISH });
+    });
+});
+
+describe('“Reset defaults” after a theme switch', () => {
+    it('restores the CURRENT theme’s surface, not the one the chart was mounted under', () => {
+        const c = chart({}); // mounted on the dark theme
+        c.setTheme('light');
+        // Settings the reset must bring back — a no-op reset cannot pass the assertions below.
+        c.renderer.applyConfig({ grid: { vertLines: { visible: false } }, margins: { top: 10, bottom: 10, right: 50 } });
+        c.renderer.openSettings();
+        const reset = [...document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Reset defaults');
+        expect(reset).toBeDefined();
+        reset!.click();
+        const cfg = config(c);
+        expect(cfg.grid.vertLines.visible).toBe(true);
+        expect(cfg.margins.right).toBe(10);
+        expect(cfg.layout).toMatchObject({ background: LIGHT_THEME.background, textColor: LIGHT_THEME.textColor });
+        expect(cfg.grid.vertLines.color).toBe(LIGHT_THEME.gridColor);
+        expect(cfg.grid.horzLines.color).toBe(LIGHT_THEME.gridColor);
+        expect(cfg.priceScale.borderColor).toBe(LIGHT_THEME.borderColor);
+        expect(cfg.panes.separatorColor).toBe(LIGHT_THEME.borderColor);
+    });
+
+    it('keeps a candle color someone chose, with the rest on the current theme', () => {
+        const PAPER = { ...LIGHT_THEME, upColor: '#00aaff', downColor: '#ff00aa' };
+        const c = chart({ upColor: '#123456' }); // chosen before mount, part of the factory snapshot
+        c.setTheme(PAPER);
+        c.renderer.applyConfig({ grid: { horzLines: { visible: false } } });
+        c.renderer.openSettings();
+        [...document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Reset defaults')!.click();
+        const cfg = config(c);
+        expect(cfg.grid.horzLines.visible).toBe(true);
+        expect(cfg.layout.background).toBe(LIGHT_THEME.background);
+        expect(cfg.candles).toMatchObject({ upColor: '#123456', downColor: '#ff00aa' });
     });
 });

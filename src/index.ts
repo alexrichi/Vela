@@ -11,7 +11,8 @@ export { NativeRenderer } from './renderers/native/NativeRenderer';
 // The drawing-toolbar VIEW as a standalone component — a workspace shell mounts ONE
 // shared bar (dock:'static') and routes it to the active chart's `chart.drawings`.
 export { DrawingToolbar, type DrawingToolbarOptions } from './renderers/native/drawings/DrawingToolbar';
-export type { ChartConfig, ChartStyle } from './renderers/native/core/chartConfig';
+export type { ChartConfig, ChartConfigState, ChartStyle } from './renderers/native/core/chartConfig';
+export { defaultChartConfig } from './renderers/native/core/chartConfig';
 export { MultiProviderFeed } from './data/MultiProviderFeed';
 export { CachingDataFeed } from './data/CachingDataFeed';
 export { BarStore, sharedBarStore } from './data/BarStore';

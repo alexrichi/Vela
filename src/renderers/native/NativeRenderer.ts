@@ -90,7 +90,7 @@ import { MARK_PULSE_MS } from './chrome/marks/paint';
 import type { MarkClickEvent, MarkGroup, TimelineMark } from '../../core/marks/types';
 import { rescaleAround, shiftScale } from './core/manualScale';
 import { resizeSplit, type PaneSplit } from './core/paneResize';
-import { type ChartConfig, CHART_CONFIG_VERSION, factoryResetConfig, followThemeColors, themeColorFollower, columnsColorFollower, columnsDefaultColors, mergeConfig, BASELINE_TOP_LINE, BASELINE_BOTTOM_LINE, BASELINE_FILL_ALPHA, BASELINE_FILL_ALPHA_FAR, withAlpha, priceStyleIds, basePaintingOf, candleOverrideFor, effectiveCandlePaint, sanitizeCrosshairOverride } from './core/chartConfig';
+import { type ChartConfig, chartConfigFrom, factoryResetConfig, followTheme, themeColorFollower, columnsColorFollower, mergeConfig, withAlpha, priceStyleIds, basePaintingOf, candleOverrideFor, effectiveCandlePaint, sanitizeCrosshairOverride, TRANSPARENT } from './core/chartConfig';
 import { BackdropRenderer } from './backdrop/BackdropRenderer';
 import { VolumeRenderer, VOLUME_PANE_FILL_FRAC } from './volume/VolumeRenderer';
 import { rendererLayers, foldBaseModulation, type RendererLayerArgs, type RendererLayerDefinition, type RendererLayerInstance, type BasePaintingModulation } from './layers';
@@ -124,7 +124,6 @@ interface ExtLayer {
 
 const PRICE_PANE_ID = 'price';
 const WEAK_SNAP_PX = 8; // 'weak' magnet only snaps when a candle point is within this many px of the cursor
-const TRANSPARENT = 'rgba(0,0,0,0)'; // default area/baseline fill edge (fades out)
 const RIGHT_AXIS_W = AXIS_MASTER_W; // px reserved on the right for one price-axis column (the pane master scale)
 const AXIS_COL_W = AXIS_MERGED_W; // px width of each EXTRA merged-indicator scale column, added right of the master
 const COLLAPSED_PANE_H = 26; // px height of a collapsed pane's strip (legend + expand affordance)
@@ -853,114 +852,37 @@ export class NativeRenderer implements IChartRenderer {
      */
     getConfig(): ChartConfig {
         const s = this.scene.style;
-        const chartTypesBag = Object.fromEntries(Object.entries(s.chartTypes).map(([k, v]) => [k, { ...v }]));
-        const t = this.theme;
-        return {
-            version: CHART_CONFIG_VERSION,
-            chartTypes: chartTypesBag,
-            layout: {
-                background: t.background,
-                textColor: t.textColor,
-                fontFamily: t.fontFamily,
-                fontSize: s.fontSize,
-            },
-            grid: {
-                vertLines: { visible: s.gridVert.visible, color: s.gridVert.color ?? t.gridColor },
-                horzLines: { visible: s.gridHorz.visible, color: s.gridHorz.color ?? t.gridColor },
-            },
-            crosshair: {
-                color: s.crosshair.color ?? t.textColor,
-                width: s.crosshair.width,
-                style: s.crosshair.style,
-                opacity: s.crosshair.opacity,
-                labelBackground: s.crosshair.labelBackground ?? t.textColor,
-            },
-            priceScale: {
-                mode: this.scene.scaleMode,
-                log: this.scene.logScale,
-                invert: this.scene.invertScale,
-                priceOnly: this.scene.scalePriceOnly,
-                freePan: this.freePanOn,
-                borderColor: s.borderColor ?? t.borderColor,
-                labelsVisible: this.scene.showAxisLabels,
-                currentPriceLine: this.scene.showPriceLine,
-                priceLabel: this.scene.showPriceLabel,
-                countdown: this.scene.showCountdown,
-                indicatorValueLabels: this.scene.showIndicatorValueLabels,
-                indicatorNameLabels: this.scene.showIndicatorNameLabels,
-                animateLastPrice: this.animLiveBar.on,
-            },
+        return chartConfigFrom({
+            chartTypes: Object.fromEntries(Object.entries(s.chartTypes).map(([k, v]) => [k, { ...v }])),
+            theme: this.theme,
+            style: s,
+            priceStyle: this.chosenStyle,
+            scaleMode: this.scene.scaleMode,
+            logScale: this.scene.logScale,
+            invertScale: this.scene.invertScale,
+            priceOnly: this.scene.scalePriceOnly,
+            freePan: this.freePanOn,
+            axisLabels: this.scene.showAxisLabels,
+            currentPriceLine: this.scene.showPriceLine,
+            priceLabel: this.scene.showPriceLabel,
+            countdown: this.scene.showCountdown,
+            indicatorValueLabels: this.scene.showIndicatorValueLabels,
+            indicatorNameLabels: this.scene.showIndicatorNameLabels,
+            animateLastPrice: this.animLiveBar.on,
             animations: {
                 zoom: this.animZoom.on,
                 pan: this.animPan.on,
                 autoscale: this.animAutoscale.on,
                 intro: this.intro.style !== false,
             },
-            panes: { separatorColor: s.separatorColor ?? t.borderColor },
-            margins: { ...s.margins },
-            trades: {
-                visible: this.scene.tradeMarkers.visible,
-                labels: this.scene.tradeMarkers.labels,
-                qty: this.scene.tradeMarkers.qty,
-                longColor: this.scene.tradeMarkers.colors.long,
-                shortColor: this.scene.tradeMarkers.colors.short,
-                exitColor: this.scene.tradeMarkers.colors.exit,
-            },
-            timeScale: { timezone: this.scene.timezone },
-            marks: { visible: this.scene.marks.visible, groups: { ...this.scene.marks.groups } },
-            candles: {
-                upColor: this.candleUp,
-                downColor: this.candleDown,
-                bodyVisible: s.candle.bodyVisible,
-                borderVisible: s.candle.borderVisible,
-                borderUpColor: s.candle.borderUpColor ?? this.candleUp,
-                borderDownColor: s.candle.borderDownColor ?? this.candleDown,
-                wickVisible: s.candle.wickVisible,
-                wickUpColor: s.candle.wickUpColor ?? this.candleUp,
-                wickDownColor: s.candle.wickDownColor ?? this.candleDown,
-            },
-            bars: {
-                upColor: s.bars.upColor ?? this.candleUp,
-                downColor: s.bars.downColor ?? this.candleDown,
-            },
-            line: {
-                color: s.line.color ?? this.candleUp,
-                width: s.line.width,
-            },
-            stacking: {
-                candles: this.scene.candleZ,
-                series: Object.fromEntries(this.scene.indicatorZOrder().map(({ id, z }) => [id, z])),
-            },
-            area: (() => {
-                const lineColor = s.area.lineColor ?? this.candleUp;
-                return {
-                    lineColor,
-                    width: s.area.width,
-                    topColor: s.area.topColor ?? lineColor,
-                    bottomColor: s.area.bottomColor ?? TRANSPARENT,
-                };
-            })(),
-            baseline: (() => {
-                const topLineColor = s.baseline.topLineColor ?? BASELINE_TOP_LINE;
-                const bottomLineColor = s.baseline.bottomLineColor ?? BASELINE_BOTTOM_LINE;
-                return {
-                    topLineColor,
-                    bottomLineColor,
-                    topFillColor: s.baseline.topFillColor ?? withAlpha(topLineColor, BASELINE_FILL_ALPHA),
-                    topFillColor2: s.baseline.topFillColor2 ?? withAlpha(topLineColor, BASELINE_FILL_ALPHA_FAR),
-                    bottomFillColor: s.baseline.bottomFillColor ?? withAlpha(bottomLineColor, BASELINE_FILL_ALPHA),
-                    bottomFillColor2: s.baseline.bottomFillColor2 ?? withAlpha(bottomLineColor, BASELINE_FILL_ALPHA_FAR),
-                    width: s.baseline.width,
-                    baselineLevel: s.baseline.baselineLevel,
-                };
-            })(),
-            columns: (() => {
-                const wash = columnsDefaultColors({ upColor: this.candleUp, downColor: this.candleDown });
-                return { upColor: s.columns.upColor ?? wash.upColor, downColor: s.columns.downColor ?? wash.downColor };
-            })(),
-            series: { style: this.chosenStyle, baseline: this.scene.baselineValue, spacing: this.coords.spacingScale },
-            sessions: { premarketColor: s.sessions.premarketColor, postmarketColor: s.sessions.postmarketColor, extendedColor: s.sessions.extendedColor },
-        };
+            tradeMarkers: this.scene.tradeMarkers,
+            timezone: this.scene.timezone,
+            marks: this.scene.marks,
+            candleZ: this.scene.candleZ,
+            seriesZ: Object.fromEntries(this.scene.indicatorZOrder().map(({ id, z }) => [id, z])),
+            baseline: this.scene.baselineValue,
+            spacing: this.coords.spacingScale,
+        });
     }
 
     /**
@@ -1256,8 +1178,9 @@ export class NativeRenderer implements IChartRenderer {
      * merge, like the type bags) are named back to their host-declared visibility.
      */
     private factoryResetDocument(factory: ChartConfig): ChartConfig {
-        // The snapshot's candle colors were its theme's; the reset gives the current theme's.
-        const doc = followThemeColors(factoryResetConfig(factory, this.chosenStyle), this.factoryTheme, this.appTheme);
+        // The snapshot's colors were its theme's; the reset gives the CURRENT theme's —
+        // a theme switched after mount is not a settings change.
+        const doc = followTheme(factoryResetConfig(factory, this.chosenStyle), this.factoryTheme, this.appTheme);
         const groups = { ...doc.marks.groups };
         for (const g of this.markGroupsInUse()) groups[g.id] = g.visible !== false;
         return { ...doc, marks: { ...doc.marks, groups } };

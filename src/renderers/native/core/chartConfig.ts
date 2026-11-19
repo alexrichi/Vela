@@ -2,7 +2,9 @@ import type { LineStyle } from '../../../core/model/series';
 import { chartTypes, settingsRowValueKeys, type SettingsRowDescriptor } from '../../../chart-types/registry';
 import { withAlpha } from '../../../core/color';
 import { ACCENT, BEARISH, BULLISH, CHIP_PLATE, CROSSHAIR, SERIES_LINE, WARNING } from '../../../core/palette';
-import type { PriceStyle } from '../../../core/options';
+import type { PriceStyle, VelaTheme } from '../../../core/options';
+import { defaultMarksState, type MarksDisplayState } from '../../shared/marks-state';
+import { defaultTradeMarkersState, type TradeMarkersState } from '../../shared/trade-markers';
 import type { ScaleMode } from './SceneGraph';
 
 /**
@@ -22,6 +24,8 @@ import type { ScaleMode } from './SceneGraph';
  * `applyConfig(json)` total — it never throws on bad input and never half-applies.
  */
 export const CHART_CONFIG_VERSION = 1;
+/** Default area/baseline fill edge (fades out). */
+export const TRANSPARENT = 'rgba(0,0,0,0)';
 
 /**
  * Baseline style defaults — the baseline chart type owns its palette and does NOT
@@ -620,6 +624,22 @@ export function columnsColorFollower(prev: CandleColors, next: CandleColors): <C
     return <C extends string | null>(color: C): C => followWash(follow(color));
 }
 
+/** The theme fields a `ChartConfig` inherits its defaults from — the surface, the inks,
+ *  the grid/border lines, the plot font and the candle colors. */
+export interface ThemeSurface extends CandleColors {
+    background: string;
+    textColor: string;
+    gridColor: string;
+    borderColor: string;
+    fontFamily: string;
+}
+
+/** A theme default carried over: a value still on `prev`'s is that theme's default, so it
+ *  becomes `next`'s; any other value was chosen and stays. */
+function followValue<T>(prev: T, next: T): (value: T) => T {
+    return (value) => (value === prev ? next : value);
+}
+
 /** `config` with its series colors moved from `prev`'s candle colors to `next`'s (see
  *  {@link themeColorFollower}). */
 export function followThemeColors(config: ChartConfig, prev: CandleColors, next: CandleColors): ChartConfig {
@@ -642,6 +662,38 @@ export function followThemeColors(config: ChartConfig, prev: CandleColors, next:
         area: { ...area, lineColor: follow(area.lineColor), topColor: follow(area.topColor) },
         columns: { upColor: followColumns(columns.upColor), downColor: followColumns(columns.downColor) },
     };
+}
+
+/** `config` with its THEME-SURFACE cosmetics moved from `prev`'s theme to `next`'s: the plot
+ *  background and inks, the grid lines, the crosshair ink, the axis border and pane
+ *  separators, and the plot font. A value someone chose stays. */
+function followThemeSurface(config: ChartConfig, prev: ThemeSurface, next: ThemeSurface): ChartConfig {
+    const background = followValue(prev.background, next.background);
+    const text = followValue(prev.textColor, next.textColor);
+    const grid = followValue(prev.gridColor, next.gridColor);
+    const border = followValue(prev.borderColor, next.borderColor);
+    const font = followValue(prev.fontFamily, next.fontFamily);
+    const { layout, grid: lines, crosshair, priceScale, panes } = config;
+    return {
+        ...config,
+        layout: { ...layout, background: background(layout.background), textColor: text(layout.textColor), fontFamily: font(layout.fontFamily) },
+        grid: {
+            vertLines: { ...lines.vertLines, color: grid(lines.vertLines.color) },
+            horzLines: { ...lines.horzLines, color: grid(lines.horzLines.color) },
+        },
+        crosshair: { ...crosshair, color: text(crosshair.color), labelBackground: text(crosshair.labelBackground) },
+        priceScale: { ...priceScale, borderColor: border(priceScale.borderColor) },
+        panes: { ...panes, separatorColor: border(panes.separatorColor) },
+    };
+}
+
+/**
+ * `config` re-based from `prev`'s theme to `next`'s — what "Reset defaults" runs, so a theme
+ * switched after mount is respected: every cosmetic still on the previous theme's default
+ * moves to the current theme's, the series colors included, while a value someone chose stays.
+ */
+export function followTheme(config: ChartConfig, prev: ThemeSurface, next: ThemeSurface): ChartConfig {
+    return followThemeSurface(followThemeColors(config, prev, next), prev, next);
 }
 
 /**
@@ -700,6 +752,185 @@ export function factoryResetConfig(factory: ChartConfig, priceStyle: PriceStyle 
         bag[typeId] = { ...(bag[typeId] ?? {}), ...vals };
     }
     return { ...factory, chartTypes: bag, series: { ...factory.series, style: priceStyle } };
+}
+
+/**
+ * Every value `getConfig()` resolves from. The renderer passes its live fields; a fresh
+ * chart's defaults come from {@link defaultChartConfig}. Keeping one assembly means a
+ * core default and a live chart cannot drift apart.
+ */
+export interface ChartConfigState {
+    chartTypes: ChartConfig['chartTypes'];
+    theme: VelaTheme;
+    style: ChartStyle;
+    priceStyle: PriceStyle;
+    scaleMode: ScaleMode;
+    logScale: boolean;
+    invertScale: boolean;
+    priceOnly: boolean;
+    freePan: boolean;
+    axisLabels: boolean;
+    currentPriceLine: boolean;
+    priceLabel: boolean;
+    countdown: boolean;
+    indicatorValueLabels: boolean;
+    indicatorNameLabels: boolean;
+    animateLastPrice: boolean;
+    animations: { zoom: boolean; pan: boolean; autoscale: boolean; intro: boolean };
+    tradeMarkers: TradeMarkersState;
+    timezone: string;
+    marks: MarksDisplayState;
+    candleZ: number;
+    seriesZ: Record<string, number>;
+    baseline: number | null;
+    spacing: number;
+}
+
+/** The resolved config document for one state — the body of `getConfig()`. */
+export function chartConfigFrom(state: ChartConfigState): ChartConfig {
+    const s = state.style;
+    const t = state.theme;
+    return {
+        version: CHART_CONFIG_VERSION,
+        chartTypes: Object.fromEntries(Object.entries(state.chartTypes).map(([k, v]) => [k, { ...v }])),
+        layout: {
+            background: t.background,
+            textColor: t.textColor,
+            fontFamily: t.fontFamily,
+            fontSize: s.fontSize,
+        },
+        grid: {
+            vertLines: { visible: s.gridVert.visible, color: s.gridVert.color ?? t.gridColor },
+            horzLines: { visible: s.gridHorz.visible, color: s.gridHorz.color ?? t.gridColor },
+        },
+        crosshair: {
+            color: s.crosshair.color ?? t.textColor,
+            width: s.crosshair.width,
+            style: s.crosshair.style,
+            opacity: s.crosshair.opacity,
+            labelBackground: s.crosshair.labelBackground ?? t.textColor,
+        },
+        priceScale: {
+            mode: state.scaleMode,
+            log: state.logScale,
+            invert: state.invertScale,
+            priceOnly: state.priceOnly,
+            freePan: state.freePan,
+            borderColor: s.borderColor ?? t.borderColor,
+            labelsVisible: state.axisLabels,
+            currentPriceLine: state.currentPriceLine,
+            priceLabel: state.priceLabel,
+            countdown: state.countdown,
+            indicatorValueLabels: state.indicatorValueLabels,
+            indicatorNameLabels: state.indicatorNameLabels,
+            animateLastPrice: state.animateLastPrice,
+        },
+        animations: {
+            zoom: state.animations.zoom,
+            pan: state.animations.pan,
+            autoscale: state.animations.autoscale,
+            intro: state.animations.intro,
+        },
+        panes: { separatorColor: s.separatorColor ?? t.borderColor },
+        margins: { ...s.margins },
+        trades: {
+            visible: state.tradeMarkers.visible,
+            labels: state.tradeMarkers.labels,
+            qty: state.tradeMarkers.qty,
+            longColor: state.tradeMarkers.colors.long,
+            shortColor: state.tradeMarkers.colors.short,
+            exitColor: state.tradeMarkers.colors.exit,
+        },
+        timeScale: { timezone: state.timezone },
+        marks: { visible: state.marks.visible, groups: { ...state.marks.groups } },
+        candles: {
+            upColor: t.upColor,
+            downColor: t.downColor,
+            bodyVisible: s.candle.bodyVisible,
+            borderVisible: s.candle.borderVisible,
+            borderUpColor: s.candle.borderUpColor ?? t.upColor,
+            borderDownColor: s.candle.borderDownColor ?? t.downColor,
+            wickVisible: s.candle.wickVisible,
+            wickUpColor: s.candle.wickUpColor ?? t.upColor,
+            wickDownColor: s.candle.wickDownColor ?? t.downColor,
+        },
+        bars: {
+            upColor: s.bars.upColor ?? t.upColor,
+            downColor: s.bars.downColor ?? t.downColor,
+        },
+        line: {
+            color: s.line.color ?? t.upColor,
+            width: s.line.width,
+        },
+        stacking: {
+            candles: state.candleZ,
+            series: { ...state.seriesZ },
+        },
+        area: (() => {
+            const lineColor = s.area.lineColor ?? t.upColor;
+            return {
+                lineColor,
+                width: s.area.width,
+                topColor: s.area.topColor ?? lineColor,
+                bottomColor: s.area.bottomColor ?? TRANSPARENT,
+            };
+        })(),
+        baseline: (() => {
+            const topLineColor = s.baseline.topLineColor ?? BASELINE_TOP_LINE;
+            const bottomLineColor = s.baseline.bottomLineColor ?? BASELINE_BOTTOM_LINE;
+            return {
+                topLineColor,
+                bottomLineColor,
+                topFillColor: s.baseline.topFillColor ?? withAlpha(topLineColor, BASELINE_FILL_ALPHA),
+                topFillColor2: s.baseline.topFillColor2 ?? withAlpha(topLineColor, BASELINE_FILL_ALPHA_FAR),
+                bottomFillColor: s.baseline.bottomFillColor ?? withAlpha(bottomLineColor, BASELINE_FILL_ALPHA),
+                bottomFillColor2: s.baseline.bottomFillColor2 ?? withAlpha(bottomLineColor, BASELINE_FILL_ALPHA_FAR),
+                width: s.baseline.width,
+                baselineLevel: s.baseline.baselineLevel,
+            };
+        })(),
+        columns: (() => {
+            const wash = columnsDefaultColors({ upColor: t.upColor, downColor: t.downColor });
+            return { upColor: s.columns.upColor ?? wash.upColor, downColor: s.columns.downColor ?? wash.downColor };
+        })(),
+        series: { style: state.priceStyle, baseline: state.baseline, spacing: state.spacing },
+        sessions: { premarketColor: s.sessions.premarketColor, postmarketColor: s.sessions.postmarketColor, extendedColor: s.sessions.extendedColor },
+    };
+}
+
+/**
+ * A fresh chart's config for `theme` — what the chart looks like before the user changes
+ * anything. Pure: no renderer, DOM, or scene. `priceStyle` is the style the config names;
+ * callers restoring a saved style pass it, and a caller diffing defaults should leave the
+ * default.
+ */
+export function defaultChartConfig(theme: VelaTheme, options?: { priceStyle?: PriceStyle }): ChartConfig {
+    return chartConfigFrom({
+        chartTypes: {},
+        theme,
+        style: defaultChartStyle(),
+        priceStyle: options?.priceStyle ?? 'candles',
+        scaleMode: 'price',
+        logScale: false,
+        invertScale: false,
+        priceOnly: false,
+        freePan: false,
+        axisLabels: true,
+        currentPriceLine: true,
+        priceLabel: true,
+        countdown: true,
+        indicatorValueLabels: true,
+        indicatorNameLabels: false,
+        animateLastPrice: false,
+        animations: { zoom: true, pan: true, autoscale: true, intro: true },
+        tradeMarkers: defaultTradeMarkersState(),
+        timezone: 'UTC',
+        marks: defaultMarksState(),
+        candleZ: 0,
+        seriesZ: {},
+        baseline: null,
+        spacing: 1,
+    });
 }
 
 /**

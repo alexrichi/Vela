@@ -1,9 +1,9 @@
 import { afterEach, describe, it, expect } from 'vitest';
 import { NativeRenderer } from '../src/renderers/native/NativeRenderer';
 import { registerChartType, unregisterChartType } from '../src/chart-types/registry';
-import { CHART_CONFIG_VERSION, candleOverrideFor, defaultChartStyle, factoryResetConfig, followThemeColors, mergeConfig, type ChartConfig } from '../src/renderers/native/core/chartConfig';
+import { CHART_CONFIG_VERSION, candleOverrideFor, defaultChartConfig, defaultChartStyle, factoryResetConfig, followTheme, followThemeColors, mergeConfig, type ChartConfig } from '../src/renderers/native/core/chartConfig';
 import type { PriceStyle } from '../src/core/options';
-import { DARK_THEME } from '../src/core/theme';
+import { DARK_THEME, LIGHT_THEME } from '../src/core/theme';
 
 /** A known-good baseline config for the pure mergeConfig tests. */
 function baseConfig(): ChartConfig {
@@ -127,6 +127,14 @@ describe('defaultChartStyle', () => {
 });
 
 describe('NativeRenderer.getConfig — defaults resolve to concrete values', () => {
+    it('defaultChartConfig is the pure default document, no renderer needed', () => {
+        const fresh = new NativeRenderer().getConfig();
+        expect(defaultChartConfig(DARK_THEME)).toEqual(fresh);
+        // The light default is the dark one re-based to the light theme.
+        expect(defaultChartConfig(LIGHT_THEME)).toEqual(followTheme(fresh, DARK_THEME, LIGHT_THEME));
+        expect(defaultChartConfig(LIGHT_THEME, { priceStyle: 'bars' }).series.style).toBe('bars');
+    });
+
     it('emits a complete, versioned document from the dark theme', () => {
         const cfg = new NativeRenderer().getConfig();
         expect(cfg.version).toBe(CHART_CONFIG_VERSION);
@@ -159,6 +167,34 @@ describe('candle colors follow the theme', () => {
         expect(doc.candles).toMatchObject({ upColor: '#00aaff', downColor: '#ff00aa', wickUpColor: '#00aaff' });
         expect(doc.line.color).toBe(factory.line.color);
         expect(doc.layout).toEqual(factory.layout);
+    });
+});
+
+describe('followTheme — a reset document follows the CURRENT theme, not the mount theme', () => {
+    it('moves the surface cosmetics along with the series colors', () => {
+        const factory = new NativeRenderer().getConfig(); // mounted on the dark theme
+        const doc = followTheme(factory, DARK_THEME, LIGHT_THEME);
+        expect(doc.layout).toEqual({ ...factory.layout, background: LIGHT_THEME.background, textColor: LIGHT_THEME.textColor });
+        expect(doc.grid.vertLines.color).toBe(LIGHT_THEME.gridColor);
+        expect(doc.grid.horzLines.color).toBe(LIGHT_THEME.gridColor);
+        expect(doc.priceScale.borderColor).toBe(LIGHT_THEME.borderColor);
+        expect(doc.panes.separatorColor).toBe(LIGHT_THEME.borderColor);
+        expect(doc.candles).toMatchObject({ upColor: LIGHT_THEME.upColor, downColor: LIGHT_THEME.downColor, wickUpColor: LIGHT_THEME.upColor });
+    });
+
+    it('leaves a background, an ink and a font someone chose alone', () => {
+        const factory = new NativeRenderer().getConfig();
+        const chosen: ChartConfig = {
+            ...factory,
+            layout: { ...factory.layout, background: '#123456', fontFamily: 'Georgia, serif' },
+            grid: { ...factory.grid, vertLines: { ...factory.grid.vertLines, color: '#abcdef' } },
+            priceScale: { ...factory.priceScale, borderColor: '#fedcba' },
+        };
+        const doc = followTheme(chosen, DARK_THEME, LIGHT_THEME);
+        expect(doc.layout).toMatchObject({ background: '#123456', fontFamily: 'Georgia, serif' });
+        expect(doc.grid.vertLines.color).toBe('#abcdef');
+        expect(doc.grid.horzLines.color).toBe(LIGHT_THEME.gridColor); // the untouched line still follows
+        expect(doc.priceScale.borderColor).toBe('#fedcba');
     });
 });
 
